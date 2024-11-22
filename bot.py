@@ -1,9 +1,8 @@
 import telebot
-import requests
-from bs4 import BeautifulSoup
 import time
 from datetime import datetime
 import threading
+from bestchange_api import BestChange
 from config import *
 
 # Инициализация бота
@@ -16,28 +15,28 @@ class ExchangeRateMonitor:
     def __init__(self):
         self.last_rate = None
         self.is_running = True
+        self.bc = BestChange()
 
     def get_current_rate(self):
-        """Получает текущий курс обмена с сайта"""
+        """Получает текущий курс обмена через API"""
         try:
-            response = requests.get(URL, headers=HEADERS, timeout=30)
-            response.raise_for_status()
+            # Обновляем данные
+            self.bc.load_rates()
             
-            soup = BeautifulSoup(response.text, 'html.parser')
-            # Находим таблицу с курсами
-            rate_element = soup.find('div', class_='bi rate-value')
+            # Получаем курсы обмена Приват24 UAH -> Сбербанк RUB
+            # 56 - код Приват24 UAH
+            # 42 - код Сбербанк RUB
+            rates = self.bc.get_exchanges(56, 42)
             
-            if rate_element:
-                # Извлекаем числовое значение курса
-                rate_text = rate_element.text.strip().replace(',', '.')
-                return float(rate_text)
+            if rates and len(rates) > 0:
+                # Берем лучший курс (первый в списке)
+                best_rate = rates[0]
+                return float(best_rate.rate)
+            
             return None
             
-        except requests.exceptions.RequestException as e:
-            print(f"Ошибка при получении данных: {e}")
-            return None
         except Exception as e:
-            print(f"Неожиданная ошибка: {e}")
+            print(f"Ошибка при получении курса: {e}")
             return None
 
     def should_notify(self, current_rate):
@@ -51,7 +50,7 @@ class ExchangeRateMonitor:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         message = (
             f"🔄 Обновление курса!\n\n"
-            f"📊 Текущий курс: {rate:.2f}\n"
+            f"📊 Текущий курс обмена Приват24 UAH на Сбербанк RUB: {rate:.4f}\n"
             f"⏰ Время: {timestamp}"
         )
         
@@ -74,9 +73,12 @@ class ExchangeRateMonitor:
                 current_rate = self.get_current_rate()
                 
                 if current_rate is not None:
+                    print(f"Получен текущий курс: {current_rate:.4f}")
                     if self.should_notify(current_rate):
                         self.send_rate_update(current_rate)
                         self.last_rate = current_rate
+                else:
+                    print("Не удалось получить текущий курс")
                 
                 time.sleep(CHECK_INTERVAL)
             except Exception as e:
@@ -88,14 +90,13 @@ class ExchangeRateMonitor:
 def start(message):
     """Обработчик команды /start"""
     welcome_text = (
-        "👋 Привет! Я бот для мониторинга курса обмена.\n\n"
+        "👋 Привет! Я бот для мониторинга курса обмена Приват24 UAH на Сбербанк RUB.\n\n"
         "Доступные команды:\n"
         "/subscribe - Подписаться на уведомления\n"
         "/unsubscribe - Отписаться от уведомлений\n"
         "/current - Получить текущий курс\n"
         "/help - Показать это сообщение\n\n"
-        "Я буду отправлять уведомления при изменении курса на "
-        f"{RATE_THRESHOLD} или более."
+        f"Я буду отправлять уведомления при изменении курса на {RATE_THRESHOLD} или более."
     )
     bot.reply_to(message, welcome_text)
 
@@ -141,7 +142,7 @@ def current_rate(message):
     monitor = ExchangeRateMonitor()
     rate = monitor.get_current_rate()
     if rate:
-        bot.reply_to(message, f"📊 Текущий курс обмена: {rate:.2f}")
+        bot.reply_to(message, f"📊 Текущий курс обмена Приват24 UAH на Сбербанк RUB: {rate:.4f}")
     else:
         bot.reply_to(
             message, 
